@@ -1,0 +1,55 @@
+
+name: Build PG Manager APK for Cloudflare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-url:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Update app URL
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = "heartfelt-starburst-e976e2.netlify.app"
+          new = "pg-app.madhujama33.workers.dev"
+
+          for p in Path(".").rglob("*"):
+              if not p.is_file():
+                  continue
+              if any(x in p.parts for x in
+                     [".git", "build", ".gradle", "node_modules"]):
+                  continue
+              if p.suffix.lower() in [
+                  ".apk", ".png", ".jpg", ".zip", ".jar"
+              ]:
+                  continue
+              try:
+                  text = p.read_text(encoding="utf-8")
+              except (UnicodeError, OSError):
+                  continue
+              updated = text.replace(
+                  "https://" + old, "https://" + new
+              ).replace(old, new)
+              if updated != text:
+                  p.write_text(updated, encoding="utf-8")
+                  print("Updated:", p)
+          PY
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || \
+            (git commit -m "Switch app URL to Cloudflare" && git push)
