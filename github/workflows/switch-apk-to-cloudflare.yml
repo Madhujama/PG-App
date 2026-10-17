@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  update-url:
+  update-and-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,34 +22,55 @@ jobs:
 
           old = "heartfelt-starburst-e976e2.netlify.app"
           new = "pg-app.madhujama33.workers.dev"
+          changed = []
 
           for p in Path(".").rglob("*"):
               if not p.is_file():
                   continue
-              if any(x in p.parts for x in
-                     [".git", "build", ".gradle", "node_modules"]):
+              if any(x in p.parts for x in [
+                  ".git", "build", ".gradle", "node_modules"
+              ]):
                   continue
               if p.suffix.lower() in [
-                  ".apk", ".png", ".jpg", ".zip", ".jar"
+                  ".apk", ".png", ".jpg", ".jpeg",
+                  ".zip", ".jar", ".class"
               ]:
                   continue
               try:
                   text = p.read_text(encoding="utf-8")
               except (UnicodeError, OSError):
                   continue
+
               updated = text.replace(
                   "https://" + old, "https://" + new
               ).replace(old, new)
+
               if updated != text:
                   p.write_text(updated, encoding="utf-8")
-                  print("Updated:", p)
+                  changed.append(str(p))
+
+          print("Updated files:", changed)
+          if not changed:
+              print("WARNING: No matching Netlify URL found.")
           PY
 
-      - name: Commit changes
+      - name: Commit URL changes
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || \
-            (git commit -m "Switch app URL to Cloudflare" && git push)
+          if ! git diff --cached --quiet; then
+            git commit -m "Switch app URL to Cloudflare"
+            git push
+          fi
+
+      - name: Build APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Radha-Krishna-PG-Manager-Cloudflare-APK
+          path: "**/build/outputs/apk/**/*.apk"
