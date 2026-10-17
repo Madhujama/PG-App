@@ -1,1 +1,39 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radha Krishna PG Manager</title><link rel="stylesheet" href="styles.css"><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="config.js"></script><script defer src="app.js"></script></head><body><header><h1>Radha Krishna PG Manager</h1><p>Resident registration &amp; daily meal register</p></header><main><section id="login-panel" class="panel narrow"><h2>Admin sign in</h2><form id="login-form"><label>Email<input id="email" type="email" value="malleshwari.c69@gmail.com" required></label><label>Password<input id="password" type="password" required></label><button>Sign in</button><p id="login-message" class="message"></p></form></section><section id="dashboard" hidden><div class="bar"><h2>Admin dashboard</h2><button id="logout">Sign out</button></div><nav><button data-tab="residents" class="active">Residents</button><button data-tab="meals">Daily meals</button><button data-tab="qr">QR Code</button></nav><section id="residents" class="panel"><h2>Residents</h2><button id="refresh">Refresh</button><p class="muted">View or download selected resident details; mark moved-out residents inactive.</p><div id="resident-list"></div><div id="detail" class="panel" hidden></div></section><section id="meals" class="panel" hidden><h2>Daily meals</h2><div class="grid"><label>Date<input id="date" type="date"></label><label>Meal<select id="meal"><option>breakfast</option><option>lunch</option><option>dinner</option></select></label></div><h3>PG residents</h3><div id="checks"></div><button id="save-residents">Save selected meals</button><hr><h3>Outside customer</h3><form id="outside" class="grid"><label>Name<input id="out-name" required></label><label>Phone number<input id="out-phone" type="tel" required></label><button>Add outside meal</button></form><p id="meal-message" class="message"></p><div class="totals">Total: <b id="total">0</b> · Residents: <b id="resident-total">0</b> · Outside: <b id="outside-total">0</b></div><div id="records"></div></section><section id="qr" class="panel" hidden><h2>Registration QR Code</h2><p>Let newcomers scan this code to open the public Radha Krishna PG Admission Form.</p><div class="qr-panel"><img id="registration-qr" alt="QR code for PG registration" width="280" height="280"><p><a id="registration-link" href="register.html" target="_blank" rel="noopener">Open registration form</a></p><button id="download-qr" type="button">Download QR Code</button> <button id="print-qr" type="button" class="secondary">Print QR Code</button><p class="muted">Share or print this QR code. Anyone who scans it can open the registration form.</p></div></section></section><p class="muted">Keep resident identity documents private.</p></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Radha Krishna PG Manager</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script><script defer src="app.js"></script>
+</head>
+<body>
+<header><h1>Radha Krishna PG Manager</h1><p>Resident registration &amp; daily meal register</p></header>
+<main>
+  <section id="login-panel" class="panel narrow"><h2>Admin sign in</h2><form id="login-form"><label>Email<input id="email" type="email" value="malleshwari.c69@gmail.com" required></label><label>Password<input id="password" type="password" required></label><button>Sign in</button><p id="login-message" class="message"></p></form></section>
+  <section id="dashboard" hidden>
+    <div class="bar"><h2>Admin dashboard</h2><button id="logout">Sign out</button></div>
+    <nav><button data-tab="residents" class="active">Residence</button><button data-tab="meals">Daily meals</button><button data-tab="qr">QR Code</button></nav>
+    <section id="residents" class="panel">
+      <div class="bar"><h2>Residence</h2><div><button id="refresh">Refresh</button><button id="view-all" class="secondary">View all registered members</button></div></div>
+      <p class="muted">View admission details, download an individual registration form, or mark a moved-out resident inactive.</p>
+      <div id="resident-list"></div>
+      <section id="all-members" class="panel" hidden><div class="bar"><h3>All registered PG members</h3><button id="close-all" class="secondary">Close list</button></div><div id="all-members-list"></div></section>
+      <div id="detail" class="panel" hidden></div>
+    </section>
+    <section id="meals" class="panel" hidden>
+      <div class="bar"><h2>Daily meals</h2><label class="date-field">Date<input id="date" type="date"></label></div>
+      <p class="muted">Select Lunch and/or Dinner for each PG resident and outside customer, then save.</p>
+      <form id="outside" class="grid"><label>Outside customer name<input id="out-name" required></label><label>Phone number<input id="out-phone" type="tel" required></label><div><button>Add outside customer</button></div></form>
+      <p id="meal-message" class="message" role="status"></p>
+      <div class="table"><table class="meal-table"><thead><tr><th>Customer name</th><th>Type / phone</th><th>Lunch</th><th>Dinner</th><th>Action</th></tr></thead><tbody id="meal-checklist"></tbody></table></div>
+      <button id="save-meals">Save meal checklist</button>
+      <div class="totals">People listed: <b id="total">0</b> · Lunch count: <b id="lunch-total">0</b> · Dinner count: <b id="dinner-total">0</b></div>
+      <h3>Attendance Records</h3><p class="muted">Yes/No shows whether each person has lunch or dinner recorded for the selected date.</p>
+      <div id="records"></div>
+    </section>
+    <section id="qr" class="panel" hidden><h2>Registration QR Code</h2><p>Let newcomers scan this code to open the public Radha Krishna PG Admission Form.</p><div class="qr-panel"><img id="registration-qr" alt="QR code for PG registration" width="280" height="280"><p><a id="registration-link" href="register.html" target="_blank" rel="noopener">Open registration form</a></p><button id="download-qr" type="button">Download QR Code</button> <button id="print-qr" type="button" class="secondary">Print QR Code</button><p class="muted">Share or print this QR code. Anyone who scans it can open the registration form.</p></div></section>
+  </section>
+  <p class="muted">Keep resident identity documents private.</p>
+</main>
+</body></html>
