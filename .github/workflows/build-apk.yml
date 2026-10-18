@@ -24,35 +24,27 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle 8.9
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK
         shell: bash
         run: |
           set -e
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager | head -n 1)"
-
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
           if [ -z "$SDKMANAGER" ]; then
             echo "Android SDK manager not found"
             exit 1
           fi
-
           yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Generate Android project
         shell: bash
         run: |
           set -e
-
           mkdir -p app/src/main/java/com/radhakrishna/pgmanager
 
           cat > settings.gradle <<'EOF'
@@ -63,7 +55,6 @@ jobs:
                   gradlePluginPortal()
               }
           }
-
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -71,7 +62,6 @@ jobs:
                   mavenCentral()
               }
           }
-
           rootProject.name = "RadhaKrishnaPGManager"
           include(":app")
           EOF
@@ -83,47 +73,42 @@ jobs:
           EOF
 
           cat > gradle.properties <<'EOF'
-          android.useAndroidX=true
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
           EOF
 
           cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
           }
-
           android {
               namespace 'com.radhakrishna.pgmanager'
               compileSdk 35
-
               defaultConfig {
                   applicationId 'com.radhakrishna.pgmanager'
                   minSdk 23
                   targetSdk 35
-                  versionCode 2
-                  versionName '1.1'
+                  versionCode 4
+                  versionName '1.3'
               }
           }
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-
+              <uses-permission android:name="android.permission.INTERNET"/>
               <application
                   android:label="Radha Krishna PG Manager"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar"
                   android:usesCleartextTraffic="false">
-
                   <activity
                       android:name=".MainActivity"
-                      android:exported="true">
-
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
-
                   </activity>
               </application>
           </manifest>
@@ -135,139 +120,183 @@ jobs:
           import android.app.Activity;
           import android.os.Bundle;
           import android.content.Intent;
-          import android.content.ActivityNotFoundException;
           import android.net.Uri;
-          import android.content.ClipData;
-          import android.webkit.ValueCallback;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import android.webkit.WebChromeClient;
-          import android.webkit.WebSettings;
-          import android.webkit.WebChromeClient.FileChooserParams;
+          import android.webkit.ValueCallback;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.DownloadListener;
+          import android.webkit.CookieManager;
+          import android.widget.Toast;
+          import android.app.DownloadManager;
+          import android.os.Environment;
+          import android.content.Context;
+          import android.database.Cursor;
+          import android.provider.OpenableColumns;
+          import android.content.ContentValues;
+          import android.provider.MediaStore;
+          import android.os.Build;
+          import android.util.Base64;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.IOException;
 
           public class MainActivity extends Activity {
-              private static final int FILE_CHOOSER_REQUEST_CODE = 1001;
-
               private WebView webView;
-              private ValueCallback<Uri[]> filePathCallback;
+              private ValueCallback<Uri[]> fileCallback;
+              private static final int FILE_REQUEST = 1001;
+              private static final String SITE = "https://pg-app.madhujama33.workers.dev";
 
               @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
+              public void onCreate(Bundle state) {
+                  super.onCreate(state);
                   webView = new WebView(this);
                   setContentView(webView);
 
-                  WebSettings settings = webView.getSettings();
-                  settings.setJavaScriptEnabled(true);
-                  settings.setDomStorageEnabled(true);
-                  settings.setAllowFileAccess(false);
+                  webView.getSettings().setJavaScriptEnabled(true);
+                  webView.getSettings().setDomStorageEnabled(true);
+                  webView.getSettings().setAllowFileAccess(true);
+                  webView.getSettings().setAllowContentAccess(true);
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-                  webView.setWebViewClient(new WebViewClient());
+                  webView.addJavascriptInterface(new BlobDownloadBridge(), "AndroidBlobDownload");
 
                   webView.setWebChromeClient(new WebChromeClient() {
                       @Override
-                      public boolean onShowFileChooser(
-                              WebView view,
+                      public boolean onShowFileChooser(WebView view,
                               ValueCallback<Uri[]> callback,
                               FileChooserParams params) {
-
-                          if (filePathCallback != null) {
-                              filePathCallback.onReceiveValue(null);
-                          }
-
-                          filePathCallback = callback;
-
-                          try {
-                              Intent intent = params.createIntent();
-                              startActivityForResult(
-                                  intent,
-                                  FILE_CHOOSER_REQUEST_CODE
-                              );
-                              return true;
-                          } catch (ActivityNotFoundException e) {
-                              filePathCallback = null;
-                              callback.onReceiveValue(null);
-                              return false;
-                          }
+                          if (fileCallback != null) fileCallback.onReceiveValue(null);
+                          fileCallback = callback;
+                          Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                          intent.addCategory(Intent.CATEGORY_OPENABLE);
+                          intent.setType("*/*");
+                          startActivityForResult(Intent.createChooser(intent, "Select file"), FILE_REQUEST);
+                          return true;
                       }
                   });
 
-                  if (savedInstanceState == null) {
-                      webView.loadUrl(
-                          "https://pg-app.madhujama33.workers.dev"
-                      );
-                  } else {
-                      webView.restoreState(savedInstanceState);
-                  }
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public void onPageFinished(WebView view, String url) {
+                          super.onPageFinished(view, url);
+                          installBlobDownloadHook();
+                      }
+                  });
+
+                  webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+                      try {
+                          DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                          request.setMimeType(mimeType);
+                          String cookies = CookieManager.getInstance().getCookie(url);
+                          if (cookies != null) request.addRequestHeader("Cookie", cookies);
+                          request.addRequestHeader("User-Agent", userAgent);
+                          request.setTitle("Registration Form");
+                          request.setDescription("Downloading registration form");
+                          request.setNotificationVisibility(
+                              DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                          request.setDestinationInExternalPublicDir(
+                              Environment.DIRECTORY_DOWNLOADS,
+                              "Registration-Form-" + System.currentTimeMillis() + ".pdf");
+                          DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                          manager.enqueue(request);
+                          Toast.makeText(this, "Download started", Toast.LENGTH_SHORT).show();
+                      } catch (Exception e) {
+                          Toast.makeText(this, "Download failed: " + e.getMessage(),
+                              Toast.LENGTH_LONG).show();
+                      }
+                  });
+
+                  webView.loadUrl(SITE);
               }
 
-              @Override
-              protected void onActivityResult(
-                      int requestCode,
-                      int resultCode,
-                      Intent data) {
-                  super.onActivityResult(requestCode, resultCode, data);
+              private void installBlobDownloadHook() {
+                  String js =
+                      "(function() {" +
+                      "if(window.__pgDownloadHookInstalled)return;" +
+                      "window.__pgDownloadHookInstalled=true;" +
+                      "const original=URL.createObjectURL.bind(URL);" +
+                      "const blobs=new Map();" +
+                      "URL.createObjectURL=function(blob){" +
+                      "const u=original(blob);blobs.set(u,blob);return u;" +
+                      "};" +
+                      "document.addEventListener('click',function(e){" +
+                      "let a=e.target.closest('a');if(!a)return;" +
+                      "let u=a.href||'';if(!u.startsWith('blob:'))return;" +
+                      "let b=blobs.get(u);if(!b)return;" +
+                      "e.preventDefault();" +
+                      "let r=new FileReader();" +
+                      "r.onload=function(){" +
+                      "let s=String(r.result).split(',')[1]||'';" +
+                      "let name=a.download||'Registration-Form.pdf';" +
+                      "AndroidBlobDownload.saveFile(name,b.type||'application/pdf',s);" +
+                      "};r.readAsDataURL(b);" +
+                      "},true);" +
+                      "})();";
+                  webView.evaluateJavascript(js, null);
+              }
 
-                  if (requestCode != FILE_CHOOSER_REQUEST_CODE) {
-                      return;
-                  }
-
-                  if (filePathCallback == null) {
-                      return;
-                  }
-
-                  Uri[] results = null;
-
-                  if (resultCode == RESULT_OK && data != null) {
-                      ClipData clipData = data.getClipData();
-
-                      if (clipData != null) {
-                          int count = clipData.getItemCount();
-                          results = new Uri[count];
-
-                          for (int i = 0; i < count; i++) {
-                              results[i] = clipData.getItemAt(i).getUri();
+              public class BlobDownloadBridge {
+                  @JavascriptInterface
+                  public void saveFile(String filename, String mimeType, String base64) {
+                      try {
+                          byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                          String safeName = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
+                          if (safeName.isEmpty()) safeName = "Registration-Form.pdf";
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                              ContentValues values = new ContentValues();
+                              values.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
+                              values.put(MediaStore.Downloads.MIME_TYPE,
+                                  mimeType == null || mimeType.isEmpty() ? "application/pdf" : mimeType);
+                              values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                              Uri uri = getContentResolver().insert(
+                                  MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                              if (uri == null) throw new IOException("Could not create download file");
+                              try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                                  if (out == null) throw new IOException("Could not open download file");
+                                  out.write(bytes);
+                              }
+                          } else {
+                              File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                              if (dir == null) throw new IOException("Downloads folder unavailable");
+                              File file = new File(dir, safeName);
+                              try (FileOutputStream out = new FileOutputStream(file)) {
+                                  out.write(bytes);
+                              }
                           }
-                      } else if (data.getData() != null) {
-                          results = new Uri[] { data.getData() };
+                          runOnUiThread(() ->
+                              Toast.makeText(MainActivity.this, "Saved to Downloads",
+                                  Toast.LENGTH_LONG).show());
+                      } catch (Exception e) {
+                          runOnUiThread(() ->
+                              Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(),
+                                  Toast.LENGTH_LONG).show());
                       }
                   }
-
-                  filePathCallback.onReceiveValue(results);
-                  filePathCallback = null;
               }
 
               @Override
-              protected void onSaveInstanceState(Bundle outState) {
-                  super.onSaveInstanceState(outState);
-                  if (webView != null) {
-                      webView.saveState(outState);
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+                  if (requestCode == FILE_REQUEST && fileCallback != null) {
+                      Uri[] result = null;
+                      if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                          result = new Uri[]{data.getData()};
+                      }
+                      fileCallback.onReceiveValue(result);
+                      fileCallback = null;
                   }
               }
 
               @Override
               public void onBackPressed() {
-                  if (webView != null && webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  if (filePathCallback != null) {
-                      filePathCallback.onReceiveValue(null);
-                      filePathCallback = null;
-                  }
-
-                  if (webView != null) {
-                      webView.destroy();
-                      webView = null;
-                  }
-
-                  super.onDestroy();
+                  if (webView != null && webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
               }
           }
           EOF
