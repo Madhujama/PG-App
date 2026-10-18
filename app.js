@@ -27,11 +27,21 @@
     if(window.html2pdf)return Promise.resolve();
     if(window.__pgHtml2PdfLoading)return window.__pgHtml2PdfLoading;
     window.__pgHtml2PdfLoading=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');
-      script.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload=()=>window.html2pdf?resolve():reject(Error('PDF library did not load'));
-      script.onerror=()=>reject(Error('Could not load the PDF generator. Check your internet connection and try again.'));
-      document.head.appendChild(script);
+      const sources=[
+        'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'
+      ];
+      let index=0;
+      const tryNext=()=>{
+        if(window.html2pdf){resolve();return;}
+        if(index>=sources.length){reject(Error('PDF library could not load from either source. Check your internet connection, then reload the page.'));return;}
+        const script=document.createElement('script');
+        script.src=sources[index++];
+        script.onload=()=>window.html2pdf?resolve():tryNext();
+        script.onerror=()=>tryNext();
+        document.head.appendChild(script);
+      };
+      tryNext();
     });
     return window.__pgHtml2PdfLoading;
   }
@@ -62,7 +72,7 @@
       const css='body{font:14px Arial,sans-serif;color:#111;margin:0}h1{text-align:center;font-size:22px;margin:0 0 5px}.sub{text-align:center;margin:0 0 20px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #555;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{width:34%;background:#f0f0f0}.signatures{display:flex;justify-content:space-between;gap:30px;margin-top:54px}.signatures span{border-top:1px solid #333;padding-top:7px;width:42%;text-align:center}.note{font-size:10px;margin-top:22px}.attachment{margin-top:18px;page-break-inside:avoid}.photo{max-width:220px;max-height:260px;object-fit:contain}h2{font-size:16px;margin-top:24px}h3{font-size:13px}';
       await loadHtml2Pdf();
       holder=document.createElement('div');
-      holder.style.cssText='position:fixed;left:-10000px;top:0;width:760px;padding:24px;background:#fff;color:#111;z-index:-1;';
+      holder.style.cssText='position:fixed;left:-10000px;top:0;width:760px;padding:24px;background:#fff;color:#111;z-index:99999;';
       const style=document.createElement('style');style.textContent=css;holder.appendChild(style);
       const content=document.createElement('div');content.innerHTML=body;holder.appendChild(content);document.body.appendChild(holder);
       await window.html2pdf().set({
