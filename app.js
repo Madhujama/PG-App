@@ -23,13 +23,63 @@
   }
   async function loadAllResidents(){const {data,error}=await db.from('residents').select('*').order('full_name');if(error){$('all-members-list').textContent=error.message;return}allResidents=data||[];$('all-members-list').innerHTML=allResidents.length?'<div class="table"><table><thead><tr><th>Name</th><th>Phone</th><th>Status</th><th>Action</th></tr></thead><tbody>'+allResidents.map(r=>`<tr><td>${esc(r.full_name)}</td><td>${esc(r.phone)}</td><td>${r.is_active?'Active':'Moved out'}</td><td><button data-all-view="${esc(r.id)}">View / download</button></td></tr>`).join('')+'</tbody></table></div>':'No registration records found.';$('all-members-list').querySelectorAll('[data-all-view]').forEach(b=>b.onclick=()=>viewResident(b.dataset.allView))}
   function viewResident(id){const r=[...people,...allResidents].find(x=>x.id===id);if(!r)return;const fields=residentFields(r);$('detail').hidden=false;$('detail').innerHTML='<div class="bar"><h3>Admission details</h3><div><button id="download-form">Download registration form</button><button id="close-detail" class="secondary">Close</button></div></div><dl>'+fields.map(([k,v])=>`<dt><b>${esc(k)}</b></dt><dd>${esc(v||'—')}</dd>`).join('')+'</dl><p id="download-status" class="muted">Private identity files remain in secure storage and are not exposed as public links.</p>';$('close-detail').onclick=()=>$('detail').hidden=true;$('download-form').onclick=()=>downloadRegistration(r,fields)}
+  function loadHtml2Pdf(){
+    if(window.html2pdf)return Promise.resolve();
+    if(window.__pgHtml2PdfLoading)return window.__pgHtml2PdfLoading;
+    window.__pgHtml2PdfLoading=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      script.onload=()=>window.html2pdf?resolve():reject(Error('PDF library did not load'));
+      script.onerror=()=>reject(Error('Could not load the PDF generator. Check your internet connection and try again.'));
+      document.head.appendChild(script);
+    });
+    return window.__pgHtml2PdfLoading;
+  }
   async function downloadRegistration(r,fields){
-    const button=$('download-form');button.disabled=true;say('download-status','Preparing your registration form and submitted attachments…');
-    const rows=fields.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v||'—')}</td></tr>`).join('');
-    const attachments=[];for(const [label,path,kind] of [['Resident photo',r.photo_path,'photo'],['Government ID document',r.government_id_path,'document'],['College/work ID',r.college_id_path,'document'],['Signature',r.signature_path,'photo']]){if(!path)continue;try{const {data,error}=await db.storage.from(c.STORAGE_BUCKET).download(path);if(error)throw error;const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(data)});const type=data.type||'application/octet-stream';attachments.push({label,kind,type,dataUrl})}catch(err){attachments.push({label,kind:'missing',type:'',dataUrl:''})}}
-    const attachmentHtml=attachments.length?'<h2>Submitted attachments</h2>'+attachments.map(a=>{if(!a.dataUrl)return `<p>${esc(a.label)}: file could not be included in this downloaded copy.</p>`;if(a.kind==='photo')return `<section class="attachment"><h3>${esc(a.label)}</h3><img class="photo" src="${a.dataUrl}" alt="${esc(a.label)}"></section>`;return `<section class="attachment"><h3>${esc(a.label)}</h3><p><a download="${esc(a.label.replace(/[^a-z0-9_-]/gi,'_'))}" href="${a.dataUrl}">Open / save submitted document</a></p>${a.type==='application/pdf'?`<object data="${a.dataUrl}" type="application/pdf" width="100%" height="480">PDF preview unavailable; use the link above.</object>`:''}</section>`}).join(''):'';
-    const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radha Krishna PG Admission Form - ${esc(r.full_name)}</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}h1{text-align:center;font-size:22px;margin-bottom:4px}.sub{text-align:center;margin:0 0 20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #555;padding:9px;text-align:left;vertical-align:top}th{width:34%;background:#f0f0f0}.signatures{display:flex;justify-content:space-between;margin-top:54px}.signatures span{border-top:1px solid #333;padding-top:7px;width:40%;text-align:center}.note{font-size:11px;margin-top:22px}.attachment{margin-top:24px;page-break-inside:avoid}.photo{max-width:240px;max-height:300px;object-fit:contain}object{margin-top:8px}@media print{body{margin:10mm}}</style></head><body><h1>Radha Krishna PG Admission Form</h1><p class="sub">Resident registration record</p><table>${rows}</table>${attachmentHtml}<div class="signatures"><span>Resident signature</span><span>PG administrator signature</span></div><p class="note">This file contains the selected resident's saved registration details and any submitted files that were successfully retrieved from private storage.</p></body></html>`;
-    const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='Radha-Krishna-PG-Admission-'+safeName(r.full_name)+'.html';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);say('download-status','Download prepared. Keep this file private because it may contain identity documents.');button.disabled=false
+    const button=$('download-form');
+    button.disabled=true;
+    say('download-status','Preparing your PDF registration form and submitted attachments…');
+    let holder;
+    try{
+      const rows=fields.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v||'—')}</td></tr>`).join('');
+      const attachments=[];
+      for(const [label,path,kind] of [['Resident photo',r.photo_path,'photo'],['Government ID document',r.government_id_path,'document'],['College/work ID',r.college_id_path,'document'],['Signature',r.signature_path,'photo']]){
+        if(!path)continue;
+        try{
+          const {data,error}=await db.storage.from(c.STORAGE_BUCKET).download(path);
+          if(error)throw error;
+          const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(data)});
+          const type=data.type||'application/octet-stream';
+          attachments.push({label,kind,type,dataUrl});
+        }catch(err){attachments.push({label,kind:'missing',type:'',dataUrl:''});}
+      }
+      const attachmentHtml=attachments.length?'<h2>Submitted attachments</h2>'+attachments.map(a=>{
+        if(!a.dataUrl)return `<p><b>${esc(a.label)}:</b> Could not retrieve this file from private storage.</p>`;
+        if(a.kind==='photo'||a.type.startsWith('image/'))return `<section class="attachment"><h3>${esc(a.label)}</h3><img class="photo" src="${a.dataUrl}" alt="${esc(a.label)}"></section>`;
+        return `<section class="attachment"><h3>${esc(a.label)}</h3><p>The original submitted document is stored separately in the PG system and is not merged into this PDF.</p></section>`;
+      }).join(''):'';
+      const body=`<h1>Radha Krishna PG Admission Form</h1><p class="sub">Resident registration record</p><table>${rows}</table>${attachmentHtml}<div class="signatures"><span>Resident signature</span><span>PG administrator signature</span></div><p class="note">This PDF contains the selected resident's saved registration details and any retrieved photo. Original government ID documents remain in private storage. Keep this PDF confidential.</p>`;
+      const css='body{font:14px Arial,sans-serif;color:#111;margin:0}h1{text-align:center;font-size:22px;margin:0 0 5px}.sub{text-align:center;margin:0 0 20px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #555;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{width:34%;background:#f0f0f0}.signatures{display:flex;justify-content:space-between;gap:30px;margin-top:54px}.signatures span{border-top:1px solid #333;padding-top:7px;width:42%;text-align:center}.note{font-size:10px;margin-top:22px}.attachment{margin-top:18px;page-break-inside:avoid}.photo{max-width:220px;max-height:260px;object-fit:contain}h2{font-size:16px;margin-top:24px}h3{font-size:13px}';
+      await loadHtml2Pdf();
+      holder=document.createElement('div');
+      holder.style.cssText='position:fixed;left:-10000px;top:0;width:760px;padding:24px;background:#fff;color:#111;z-index:-1;';
+      const style=document.createElement('style');style.textContent=css;holder.appendChild(style);
+      const content=document.createElement('div');content.innerHTML=body;holder.appendChild(content);document.body.appendChild(holder);
+      await window.html2pdf().set({
+        margin:10,
+        filename:'Radha-Krishna-PG-Admission-'+safeName(r.full_name)+'.pdf',
+        image:{type:'jpeg',quality:0.98},
+        html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false},
+        jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+        pagebreak:{mode:['css','legacy']}
+      }).from(holder).save();
+      say('download-status','PDF download started. Check your Downloads folder. Keep this file private.');
+    }catch(err){
+      say('download-status','PDF download failed: '+(err.message||'Please check your internet connection and try again.'));
+    }finally{
+      if(holder)holder.remove();
+      button.disabled=false;
+    }
   }
   async function loadMeals(){
     if(!db)return;const date=$('date').value;if(!date)return;
