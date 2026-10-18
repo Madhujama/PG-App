@@ -7,6 +7,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,22 +24,37 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-
-
-      - name: Set up Gradle
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Generate complete Android project
+      - name: Install Android SDK packages
         shell: bash
         run: |
+          set -e
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager | head -n 1)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: Android SDK manager was not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Generate Android project
+        shell: bash
+        run: |
+          set -e
+
           mkdir -p app/src/main/java/com/radhakrishna/pgmanager
 
           cat > settings.gradle <<'EOF'
@@ -47,6 +65,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -54,6 +73,7 @@ jobs:
                   mavenCentral()
               }
           }
+
           rootProject.name = "RadhaKrishnaPGManager"
           include(":app")
           EOF
@@ -91,17 +111,21 @@ jobs:
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
+
               <application
                   android:label="Radha Krishna PG Manager"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar"
                   android:usesCleartextTraffic="false">
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
+
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
+
                   </activity>
               </application>
           </manifest>
@@ -116,8 +140,6 @@ jobs:
           import android.webkit.WebViewClient;
           import android.webkit.WebChromeClient;
           import android.webkit.WebSettings;
-          import android.webkit.WebResourceRequest;
-          import android.webkit.CookieManager;
 
           public class MainActivity extends Activity {
               private WebView webView;
@@ -133,9 +155,6 @@ jobs:
                   settings.setJavaScriptEnabled(true);
                   settings.setDomStorageEnabled(true);
                   settings.setAllowFileAccess(false);
-
-                  CookieManager.getInstance()
-                      .setAcceptCookie(true);
 
                   webView.setWebViewClient(new WebViewClient());
                   webView.setWebChromeClient(new WebChromeClient());
@@ -164,7 +183,14 @@ jobs:
           }
           EOF
 
-      - name: Build Android APK
+      - name: Verify Android project
+        run: |
+          test -f settings.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/radhakrishna/pgmanager/MainActivity.java
+
+      - name: Build APK
         run: gradle :app:assembleDebug
 
       - name: Upload APK artifact
@@ -173,3 +199,4 @@ jobs:
           name: Radha-Krishna-PG-Manager-Cloudflare-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
