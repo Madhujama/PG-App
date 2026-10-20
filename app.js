@@ -50,221 +50,190 @@ async function downloadRegistration(r, fields) {
   const button = $('download-form');
   if (button) button.disabled = true;
 
-  let holder;
-
   try {
-    say('download-status', 'Preparing registration PDF...');
+    say('download-status', 'Generating registration PDF...');
 
-    // Load the PDF library if it is not already loaded.
-    await loadHtml2Pdf();
+    // Load jsPDF directly.
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src =
+          'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 
-    const rows = fields.map(([key, value]) => `
-      <tr>
-        <th>${esc(key)}</th>
-        <td>${esc(value || '—')}</td>
-      </tr>
-    `).join('');
+        script.onload = () => {
+          if (window.jspdf && window.jspdf.jsPDF) {
+            resolve();
+          } else {
+            reject(new Error('PDF library failed to initialize.'));
+          }
+        };
 
-    const attachmentHtml = [];
+        script.onerror = () => reject(
+          new Error('Cannot load PDF library. Check your internet connection.')
+        );
 
-    for (const [label, path, kind] of [
-      ['Resident photo', r.photo_path, 'photo'],
-      ['Government ID document', r.government_id_path, 'document'],
-      ['College/work ID', r.college_id_path, 'document'],
-      ['Signature', r.signature_path, 'photo']
-    ]) {
-      if (!path) continue;
-
-      try {
-        const { data, error } =
-          await db.storage.from(c.STORAGE_BUCKET).download(path);
-
-        if (error) throw error;
-
-        if (kind === 'photo' &&
-            data.type &&
-            data.type.startsWith('image/')) {
-          const dataUrl = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(data);
-          });
-
-          attachmentHtml.push(`
-            <section style="margin-top:20px;page-break-inside:avoid">
-              <h3>${esc(label)}</h3>
-              <img
-                src="${dataUrl}"
-                alt="${esc(label)}"
-                style="max-width:220px;max-height:260px;object-fit:contain"
-              >
-            </section>
-          `);
-        } else {
-          attachmentHtml.push(`
-            <p><b>${esc(label)}:</b>
-            Original file remains in private storage and is not embedded.</p>
-          `);
-        }
-      } catch (error) {
-        attachmentHtml.push(`
-          <p><b>${esc(label)}:</b>
-          Could not retrieve this file from private storage.</p>
-        `);
-      }
+        document.head.appendChild(script);
+      });
     }
 
-    // Keep the PDF content visible while html2canvas captures it.
-    holder = document.createElement('div');
+    const jsPDF = window.jspdf.jsPDF;
 
-    holder.style.cssText = [
-      'position:fixed',
-      'left:0',
-      'top:0',
-      'width:760px',
-      'height:auto',
-      'max-height:none',
-      'overflow:visible',
-      'padding:24px',
-      'background:#ffffff',
-      'color:#111111',
-      'z-index:2147483647',
-      'opacity:1',
-      'visibility:visible',
-      'pointer-events:none',
-      'font-family:Arial,sans-serif'
-    ].join(';');
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
 
-    holder.innerHTML = `
-      <style>
-        * { box-sizing: border-box; }
-        h1 { text-align:center; font-size:22px; margin:0 0 6px; }
-        .sub { text-align:center; margin:0 0 20px; }
-        table { border-collapse:collapse; width:100%; font-size:12px; }
-        th, td {
-          border:1px solid #555;
-          padding:8px;
-          text-align:left;
-          vertical-align:top;
-          overflow-wrap:anywhere;
-        }
-        th { width:34%; background:#f0f0f0; }
-        .signatures {
-          display:flex;
-          justify-content:space-between;
-          gap:30px;
-          margin-top:54px;
-        }
-        .signatures span {
-          border-top:1px solid #333;
-          padding-top:7px;
-          width:42%;
-          text-align:center;
-        }
-        .note { font-size:10px; margin-top:22px; }
-      </style>
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 15;
+    const contentWidth = pageWidth - margin * 2;
+    let y = 20;
 
-      <h1>Radha Krishna PG Admission Form</h1>
-      <p class="sub">Resident registration record</p>
-
-      <table><tbody>${rows}</tbody></table>
-
-      ${attachmentHtml.join('')}
-
-      <div class="signatures">
-        <span>Resident signature</span>
-        <span>PG administrator signature</span>
-      </div>
-
-      <p class="note">
-        This PDF contains the selected resident's saved registration details.
-        Original identity documents remain in private storage.
-        Keep this PDF confidential.
-      </p>
-    `;
-
-    document.body.appendChild(holder);
-
-    // Allow the browser to lay out the content before capture.
-    await new Promise(resolve =>
-      requestAnimationFrame(() =>
-        requestAnimationFrame(resolve)
-      )
+    // Heading
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(17);
+    pdf.text(
+      'Radha Krishna PG Admission Form',
+      pageWidth / 2,
+      y,
+      { align: 'center' }
     );
 
-    // Wait for embedded photos to load.
-    const images = Array.from(holder.querySelectorAll('img'));
+    y += 8;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10);
+    pdf.text(
+      'Resident registration record',
+      pageWidth / 2,
+      y,
+      { align: 'center' }
+    );
 
-    await Promise.all(images.map(img => {
-      if (img.complete && img.naturalWidth > 0) {
-        return Promise.resolve();
+    y += 10;
+    pdf.setDrawColor(120);
+    pdf.line(margin, y, pageWidth - margin, y);
+    y += 9;
+
+    // Registration details
+    for (const [key, value] of fields) {
+      const label = String(key || '');
+      const text = String(
+        value === null || value === undefined || value === ''
+          ? 'Not provided'
+          : value
+      );
+
+      const valueLines = pdf.splitTextToSize(
+        text,
+        contentWidth - 4
+      );
+
+      const blockHeight = 6 + valueLines.length * 5 + 4;
+
+      if (y + blockHeight > pageHeight - 20) {
+        pdf.addPage();
+        y = 20;
       }
 
-      return new Promise(resolve => {
-        img.onload = resolve;
-        img.onerror = resolve;
-        setTimeout(resolve, 5000);
-      });
-    }));
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.text(label, margin, y);
+      y += 5;
 
-    const pdf = await window.html2pdf()
-      .set({
-        margin: 10,
-        filename: 'registration.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          backgroundColor: '#ffffff',
-          useCORS: true,
-          logging: false,
-          scrollX: 0,
-          scrollY: 0,
-          windowWidth: 820
-        },
-        jsPDF: {
-          unit: 'mm',
-          format: 'a4',
-          orientation: 'portrait'
-        },
-        pagebreak: { mode: ['css', 'legacy'] }
-      })
-      .from(holder)
-      .toPdf()
-      .get('pdf');
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(valueLines, margin + 2, y);
+      y += valueLines.length * 5 + 4;
 
-    if (!pdf || pdf.getNumberOfPages() < 1) {
-      throw new Error('PDF contains no pages.');
+      pdf.setDrawColor(220);
+      pdf.line(margin, y, pageWidth - margin, y);
+      y += 3;
+    }
+
+    // Attachment status
+    if (y > pageHeight - 45) {
+      pdf.addPage();
+      y = 20;
+    }
+
+    y += 4;
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(11);
+    pdf.text('Registration attachments', margin, y);
+    y += 8;
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+
+    const attachments = [
+      ['Resident photo', r.photo_path],
+      ['Government ID document', r.government_id_path],
+      ['College/work ID', r.college_id_path],
+      ['Signature', r.signature_path]
+    ];
+
+    for (const [label, path] of attachments) {
+      if (y > pageHeight - 15) {
+        pdf.addPage();
+        y = 20;
+      }
+
+      pdf.text(
+        label + ': ' + (path ? 'File saved in storage' : 'Not provided'),
+        margin,
+        y
+      );
+      y += 6;
+    }
+
+    // Page numbers
+    const pageCount = pdf.getNumberOfPages();
+
+    for (let page = 1; page <= pageCount; page++) {
+      pdf.setPage(page);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.text(
+        'Page ' + page + ' of ' + pageCount,
+        pageWidth / 2,
+        pageHeight - 7,
+        { align: 'center' }
+      );
+    }
+
+    // Generate PDF as a Blob
+    const blob = pdf.output('blob');
+
+    if (!blob || blob.size < 500) {
+      throw new Error('Generated PDF is empty.');
     }
 
     const filename =
       'Radha-Krishna-PG-Admission-' +
-      safeName(r.full_name) + '.pdf';
+      safeName(r.full_name) +
+      '.pdf';
 
-    const pdfDataUrl = pdf.output('datauristring');
-
-    if (!pdfDataUrl || !pdfDataUrl.includes(',')) {
-      throw new Error('PDF generation returned no data.');
-    }
-
-    const base64 = pdfDataUrl.split(',')[1];
-
-    if (window.PGAndroid &&
-        typeof window.PGAndroid.savePdf === 'function') {
-      window.PGAndroid.savePdf(base64, filename);
-      say('download-status', 'PDF sent for saving. Check Downloads.');
-    } else {
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-
-      const blob = new Blob([bytes], {
-        type: 'application/pdf'
+    if (
+      window.PGAndroid &&
+      typeof window.PGAndroid.savePdf === 'function'
+    ) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(
+          new Error('Could not prepare the PDF for Android.')
+        );
+        reader.readAsDataURL(blob);
       });
 
+      const base64 = String(dataUrl).split(',')[1];
+
+      if (!base64) {
+        throw new Error('Could not encode PDF for Android.');
+      }
+
+      window.PGAndroid.savePdf(base64, filename);
+    } else {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
 
@@ -275,18 +244,20 @@ async function downloadRegistration(r, fields) {
       link.remove();
 
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-
-      say('download-status', 'PDF download requested. Check Downloads.');
     }
 
+    say(
+      'download-status',
+      'PDF generated. Check your Downloads folder.'
+    );
   } catch (error) {
     console.error('Registration PDF error:', error);
+
     say(
       'download-status',
       'PDF failed: ' + (error.message || 'Please try again.')
     );
   } finally {
-    if (holder) holder.remove();
     if (button) button.disabled = false;
   }
 }
