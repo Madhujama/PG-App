@@ -46,143 +46,250 @@
     return window.__pgHtml2PdfLoading;
   }
 
-  async function downloadRegistration(r, fields) {
-    const button = $('download-form');
-    button.disabled = true;
+async function downloadRegistration(r, fields) {
+  const button = $('download-form');
+  if (button) button.disabled = true;
+
+  let holder;
+
+  try {
     say('download-status', 'Preparing registration PDF...');
 
-    let holder = null;
+    // Load the PDF library if it is not already loaded.
+    await loadHtml2Pdf();
 
-    try {
-      const rows = fields.map(([label, value]) =>
-        `<tr><th>${esc(label)}</th><td>${esc(value || '—')}</td></tr>`
-      ).join('');
+    const rows = fields.map(([key, value]) => `
+      <tr>
+        <th>${esc(key)}</th>
+        <td>${esc(value || '—')}</td>
+      </tr>
+    `).join('');
 
-      const body = `
-        <h1>Radha Krishna PG Admission Form</h1>
-        <p class="sub">Resident registration record</p>
-        <table>${rows}</table>
-        <div class="signatures">
-          <span>Resident signature</span>
-          <span>PG administrator signature</span>
-        </div>
-        <p class="note">Keep this registration record confidential.</p>
-      `;
+    const attachmentHtml = [];
 
-      await loadHtml2Pdf();
+    for (const [label, path, kind] of [
+      ['Resident photo', r.photo_path, 'photo'],
+      ['Government ID document', r.government_id_path, 'document'],
+      ['College/work ID', r.college_id_path, 'document'],
+      ['Signature', r.signature_path, 'photo']
+    ]) {
+      if (!path) continue;
 
-      holder = document.createElement('div');
-      holder.style.cssText =
-        'position:fixed;left:0;top:0;width:760px;' +
-        'padding:24px;background:#fff;color:#111;' +
-        'z-index:99999;box-sizing:border-box;';
+      try {
+        const { data, error } =
+          await db.storage.from(c.STORAGE_BUCKET).download(path);
 
-      const style = document.createElement('style');
-      style.textContent = `
-        * { box-sizing: border-box; }
-        body { font: 14px Arial, sans-serif; }
-        h1 { text-align: center; font-size: 22px; }
-        .sub { text-align: center; margin-bottom: 20px; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td {
-          border: 1px solid #555;
-          padding: 8px;
-          text-align: left;
-          overflow-wrap: anywhere;
+        if (error) throw error;
+
+        if (kind === 'photo' &&
+            data.type &&
+            data.type.startsWith('image/')) {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(data);
+          });
+
+          attachmentHtml.push(`
+            <section style="margin-top:20px;page-break-inside:avoid">
+              <h3>${esc(label)}</h3>
+              <img
+                src="${dataUrl}"
+                alt="${esc(label)}"
+                style="max-width:220px;max-height:260px;object-fit:contain"
+              >
+            </section>
+          `);
+        } else {
+          attachmentHtml.push(`
+            <p><b>${esc(label)}:</b>
+            Original file remains in private storage and is not embedded.</p>
+          `);
         }
-        th { width: 35%; background: #f0f0f0; }
+      } catch (error) {
+        attachmentHtml.push(`
+          <p><b>${esc(label)}:</b>
+          Could not retrieve this file from private storage.</p>
+        `);
+      }
+    }
+
+    // Keep the PDF content visible while html2canvas captures it.
+    holder = document.createElement('div');
+
+    holder.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:0',
+      'width:760px',
+      'height:auto',
+      'max-height:none',
+      'overflow:visible',
+      'padding:24px',
+      'background:#ffffff',
+      'color:#111111',
+      'z-index:2147483647',
+      'opacity:1',
+      'visibility:visible',
+      'pointer-events:none',
+      'font-family:Arial,sans-serif'
+    ].join(';');
+
+    holder.innerHTML = `
+      <style>
+        * { box-sizing: border-box; }
+        h1 { text-align:center; font-size:22px; margin:0 0 6px; }
+        .sub { text-align:center; margin:0 0 20px; }
+        table { border-collapse:collapse; width:100%; font-size:12px; }
+        th, td {
+          border:1px solid #555;
+          padding:8px;
+          text-align:left;
+          vertical-align:top;
+          overflow-wrap:anywhere;
+        }
+        th { width:34%; background:#f0f0f0; }
         .signatures {
-          display: flex;
-          justify-content: space-between;
-          margin-top: 55px;
-          gap: 25px;
+          display:flex;
+          justify-content:space-between;
+          gap:30px;
+          margin-top:54px;
         }
         .signatures span {
-          border-top: 1px solid #333;
-          padding-top: 8px;
-          width: 45%;
-          text-align: center;
+          border-top:1px solid #333;
+          padding-top:7px;
+          width:42%;
+          text-align:center;
         }
-        .note { margin-top: 25px; font-size: 10px; }
-      `;
+        .note { font-size:10px; margin-top:22px; }
+      </style>
 
-      holder.appendChild(style);
+      <h1>Radha Krishna PG Admission Form</h1>
+      <p class="sub">Resident registration record</p>
 
-      const content = document.createElement('div');
-      content.innerHTML = body;
-      holder.appendChild(content);
-      document.body.appendChild(holder);
+      <table><tbody>${rows}</tbody></table>
 
-      // Allow the browser to lay out the content before generating the PDF.
-      await new Promise(resolve =>
-        requestAnimationFrame(() =>
-          requestAnimationFrame(resolve)
-        )
-      );
+      ${attachmentHtml.join('')}
 
-      const filename =
-        'Radha-Krishna-PG-Admission-' +
-        safeName(r.full_name) + '.pdf';
+      <div class="signatures">
+        <span>Resident signature</span>
+        <span>PG administrator signature</span>
+      </div>
 
-      const pdfDataUri = await window.html2pdf()
-        .set({
-          margin: 10,
-          filename: filename,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: {
-            scale: 2,
-            backgroundColor: '#ffffff',
-            logging: false,
-            useCORS: true,
-            scrollX: 0,
-            scrollY: 0
-          },
-          jsPDF: {
-            unit: 'mm',
-            format: 'a4',
-            orientation: 'portrait'
-          },
-          pagebreak: { mode: ['css', 'legacy'] }
-        })
-        .from(holder)
-        .outputPdf('datauristring');
+      <p class="note">
+        This PDF contains the selected resident's saved registration details.
+        Original identity documents remain in private storage.
+        Keep this PDF confidential.
+      </p>
+    `;
 
-      if (!pdfDataUri || !pdfDataUri.includes(',')) {
-        throw new Error('PDF generation returned empty data.');
+    document.body.appendChild(holder);
+
+    // Allow the browser to lay out the content before capture.
+    await new Promise(resolve =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(resolve)
+      )
+    );
+
+    // Wait for embedded photos to load.
+    const images = Array.from(holder.querySelectorAll('img'));
+
+    await Promise.all(images.map(img => {
+      if (img.complete && img.naturalWidth > 0) {
+        return Promise.resolve();
       }
 
-      // Check that the generated file contains actual PDF data.
-      const base64 = pdfDataUri.split(',')[1];
-      if (!base64 || base64.length < 100) {
-        throw new Error('The generated PDF is empty. Please try again.');
-      }
+      return new Promise(resolve => {
+        img.onload = resolve;
+        img.onerror = resolve;
+        setTimeout(resolve, 5000);
+      });
+    }));
 
-      if (window.PGAndroid &&
-          typeof window.PGAndroid.savePdf === 'function') {
-        window.PGAndroid.savePdf(base64, filename);
-        say('download-status',
-            'PDF sent to your phone. Check Downloads.');
-      } else {
-        const link = document.createElement('a');
-        link.href = pdfDataUri;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+    const pdf = await window.html2pdf()
+      .set({
+        margin: 10,
+        filename: 'registration.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: 820
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'portrait'
+        },
+        pagebreak: { mode: ['css', 'legacy'] }
+      })
+      .from(holder)
+      .toPdf()
+      .get('pdf');
 
-        say('download-status',
-            'PDF download started. Check your Downloads folder.');
-      }
-
-    } catch (err) {
-      console.error('Registration PDF error:', err);
-      say('download-status',
-          'PDF failed: ' + (err.message || 'Please try again.'));
-    } finally {
-      if (holder) holder.remove();
-      button.disabled = false;
+    if (!pdf || pdf.getNumberOfPages() < 1) {
+      throw new Error('PDF contains no pages.');
     }
+
+    const filename =
+      'Radha-Krishna-PG-Admission-' +
+      safeName(r.full_name) + '.pdf';
+
+    const pdfDataUrl = pdf.output('datauristring');
+
+    if (!pdfDataUrl || !pdfDataUrl.includes(',')) {
+      throw new Error('PDF generation returned no data.');
+    }
+
+    const base64 = pdfDataUrl.split(',')[1];
+
+    if (window.PGAndroid &&
+        typeof window.PGAndroid.savePdf === 'function') {
+      window.PGAndroid.savePdf(base64, filename);
+      say('download-status', 'PDF sent for saving. Check Downloads.');
+    } else {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const blob = new Blob([bytes], {
+        type: 'application/pdf'
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+      say('download-status', 'PDF download requested. Check Downloads.');
+    }
+
+  } catch (error) {
+    console.error('Registration PDF error:', error);
+    say(
+      'download-status',
+      'PDF failed: ' + (error.message || 'Please try again.')
+    );
+  } finally {
+    if (holder) holder.remove();
+    if (button) button.disabled = false;
   }
+}
   async function loadMeals(){
     if(!db)return;const date=$('date').value;if(!date)return;
     const [residentRes,outRes,legacyRes,attendanceRes]=await Promise.all([
